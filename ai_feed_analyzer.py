@@ -14,6 +14,14 @@ import os
 from typing import List, Dict
 import time
 from dotenv import load_dotenv
+from bs4 import BeautifulSoup
+import re
+
+# Import our new workflow discovery modules
+from scrape_make_templates import MakeTemplateScraper
+from fetch_n8n_workflows import N8nWorkflowFetcher
+from reddit_showcase_monitor import RedditShowcaseMonitor
+from workflow_database import WorkflowDatabase
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,16 +29,25 @@ load_dotenv()
 class AIFeedAnalyzer:
     def __init__(self):
         self.feeds = [
-            "https://www.reddit.com/r/MachineLearning/hot.rss",
-            "https://www.reddit.com/r/artificial/hot.rss", 
-            "https://www.reddit.com/r/OpenAI/hot.rss",
-            "https://www.reddit.com/r/ClaudeAI/hot.rss",
-            "https://www.reddit.com/r/LocalLLaMA/hot.rss",
-            "https://www.reddit.com/r/n8n/hot.rss",
-            "https://www.reddit.com/r/automation/hot.rss",
-            "https://www.reddit.com/r/nocode/hot.rss",
-            "https://news.ycombinator.com/rss",
-            "https://www.producthunt.com/topics/artificial-intelligence.rss"
+            # n8n Community - Workflows & Showcases
+            "https://community.n8n.io/c/workflows/8.rss",
+            "https://community.n8n.io/c/show/12.rss",
+            "https://community.n8n.io/c/questions/6.rss",  # Often contain workflow examples
+            
+            # Reddit Automation Communities
+            "https://www.reddit.com/r/automation/.rss",
+            "https://www.reddit.com/r/n8n/.rss",
+            "https://www.reddit.com/r/nocode/.rss",
+            
+            # Dev.to specific tags
+            "https://dev.to/feed/tag/showdev",
+            "https://dev.to/feed/tag/automation",
+            "https://dev.to/feed/tag/workflow",
+            
+            # Workflow blogs
+            "https://blog.n8n.io/rss/",
+            "https://www.make.com/en/blog/feed",
+            "https://zapier.com/blog/feeds/latest/",
         ]
         
         # You'll need to set these environment variables
@@ -39,10 +56,33 @@ class AIFeedAnalyzer:
         self.email_pass = os.getenv('EMAIL_PASS')
         self.recipient_email = os.getenv('RECIPIENT_EMAIL')
         
+        # Initialize workflow discovery tools
+        self.make_scraper = MakeTemplateScraper()
+        self.n8n_fetcher = N8nWorkflowFetcher()
+        self.reddit_monitor = RedditShowcaseMonitor()
+        self.workflow_db = WorkflowDatabase()
+        
     def fetch_recent_posts(self, hours_back: int = 24) -> List[Dict]:
         """Fetch posts from the last N hours"""
         cutoff_time = datetime.now() - timedelta(hours=hours_back)
         all_posts = []
+        
+        # Keywords to prioritize automation content
+        automation_keywords = [
+            'n8n', 'make.com', 'zapier', 'activepieces', 'langchain', 'claude',
+            'workflow', 'automation', 'integration', 'no-code', 'low-code',
+            'api', 'webhook', 'trigger', 'template', 'tutorial', 'rss to',
+            'automate', 'connect', 'sync', 'pipeline', 'orchestration',
+            'built', 'created', 'saved hours', 'reduced time', 'showcase',
+            'example', 'case study', 'how i', 'guide', 'step-by-step'
+        ]
+        
+        # Keywords that indicate concrete examples
+        showcase_keywords = [
+            'built', 'created', 'made', 'developed', 'launched',
+            'saved', 'reduced', 'improved', 'automated',
+            'tutorial', 'guide', 'example', 'showcase', 'demo'
+        ]
         
         for feed_url in self.feeds:
             try:
@@ -57,12 +97,40 @@ class AIFeedAnalyzer:
                     
                     # Only include recent posts
                     if pub_date and pub_date > cutoff_time:
+                        title_lower = entry.title.lower()
+                        summary_lower = getattr(entry, 'summary', '').lower()
+                        
+                        # Calculate relevance score
+                        relevance_score = sum(
+                            1 for keyword in automation_keywords 
+                            if keyword in title_lower or keyword in summary_lower
+                        )
+                        
+                        # Bonus points for concrete examples
+                        showcase_score = sum(
+                            2 for keyword in showcase_keywords
+                            if keyword in title_lower
+                        )
+                        
+                        # Extract potential metrics
+                        import re
+                        time_saved = re.findall(r'(\d+)\s*(?:hours?|minutes?|days?)\s*(?:saved|reduced)', 
+                                              title_lower + ' ' + summary_lower)
+                        percentage_improved = re.findall(r'(\d+)%\s*(?:improvement|reduction|faster|increase)', 
+                                                       title_lower + ' ' + summary_lower)
+                        
                         post = {
                             'title': entry.title,
                             'link': entry.link,
                             'summary': getattr(entry, 'summary', ''),
                             'published': pub_date.isoformat(),
-                            'source': feed.feed.title if hasattr(feed.feed, 'title') else feed_url
+                            'source': feed.feed.title if hasattr(feed.feed, 'title') else feed_url,
+                            'relevance_score': relevance_score + showcase_score,
+                            'is_showcase': showcase_score > 0,
+                            'metrics': {
+                                'time_saved': time_saved,
+                                'percentage': percentage_improved
+                            }
                         }
                         all_posts.append(post)
                         
@@ -71,27 +139,282 @@ class AIFeedAnalyzer:
             except Exception as e:
                 print(f"Error fetching {feed_url}: {e}")
                 continue
-                
+        
+        # Sort by relevance score and date
+        all_posts.sort(key=lambda x: (x['relevance_score'], x['published']), reverse=True)
+        
         return all_posts
+    
+    def fetch_full_content(self, url: str) -> Dict[str, str]:
+        """Fetch full content from a URL"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+            
+            # Try to find the main content area
+            content = None
+            
+            # Common content selectors
+            selectors = [
+                'article', 
+                'main',
+                '[role="main"]',
+                '.post-content',
+                '.entry-content',
+                '.content',
+                '#content',
+                '.article-body',
+                '.post-body'
+            ]
+            
+            for selector in selectors:
+                element = soup.select_one(selector)
+                if element:
+                    content = element.get_text(separator=' ', strip=True)
+                    break
+            
+            # Fallback to body
+            if not content:
+                content = soup.get_text(separator=' ', strip=True)
+            
+            # Extract workflow-specific details
+            workflow_details = {
+                'full_text': content[:5000],  # First 5000 chars
+                'code_blocks': [],
+                'metrics': [],
+                'workflow_steps': []
+            }
+            
+            # Find code blocks and JSON configs
+            code_elements = soup.find_all(['pre', 'code'])
+            for code in code_elements[:3]:  # Max 3 code blocks
+                code_text = code.get_text(strip=True)
+                workflow_details['code_blocks'].append(code_text[:500])
+                
+                # Check if it's a workflow JSON
+                if '{' in code_text and ('nodes' in code_text or 'trigger' in code_text):
+                    workflow_details['workflow_steps'].append("Found workflow configuration")
+            
+            # Look for step-by-step instructions
+            step_patterns = [
+                r'(?:step\s*\d+|first|then|next|finally)[\s:]+([^.]+)',
+                r'(?:\d+\.|•|→)\s*([^.\n]+)',
+                r'(?:trigger|action|filter):\s*([^.\n]+)'
+            ]
+            
+            for pattern in step_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                workflow_details['workflow_steps'].extend(matches[:5])
+            
+            # Extract metrics
+            metrics_patterns = [
+                r'(\d+)\s*(?:hours?|minutes?|days?)\s*(?:saved|reduced)',
+                r'(\d+)%\s*(?:improvement|reduction|faster|increase)',
+                r'(\d+x)\s*(?:faster|improvement)',
+                r'saved\s*\$(\d+)',
+                r'reduced\s*(?:by\s*)?(\d+)%'
+            ]
+            
+            for pattern in metrics_patterns:
+                matches = re.findall(pattern, content, re.IGNORECASE)
+                workflow_details['metrics'].extend(matches)
+            
+            return workflow_details
+            
+        except Exception as e:
+            print(f"Error fetching {url}: {e}")
+            return {'full_text': '', 'code_blocks': [], 'metrics': []}
+    
+    def discover_new_workflows(self):
+        """Discover new workflows from all sources"""
+        print("🔍 Discovering new workflows from all sources...")
+        new_workflows = []
+        
+        try:
+            # Get Make.com templates
+            print("  Checking Make.com templates...")
+            make_templates = self.make_scraper.get_templates(limit=3)
+            for template in make_templates:
+                if template.get('description'):
+                    workflow = {
+                        'title': template['title'],
+                        'description': template['description'],
+                        'apps': template.get('apps', []),
+                        'source': 'Make.com',
+                        'url': template.get('url', ''),
+                        'showcase_score': 6
+                    }
+                    new_workflows.append(workflow)
+        except:
+            pass
+            
+        try:
+            # Get n8n community examples
+            print("  Checking n8n workflows...")
+            n8n_examples = self.n8n_fetcher.get_workflow_examples()
+            for example in n8n_examples[:2]:  # Top 2
+                workflow = {
+                    'title': example['title'],
+                    'description': example['description'], 
+                    'apps': example['apps'],
+                    'workflow': example['workflow'],
+                    'impact': example['impact'],
+                    'complexity': example['complexity'],
+                    'time_to_build': example['time_to_build'],
+                    'source': 'n8n Examples',
+                    'showcase_score': 8
+                }
+                new_workflows.append(workflow)
+        except:
+            pass
+            
+        try:
+            # Get Reddit showcases
+            print("  Checking Reddit showcases...")
+            reddit_showcases = self.reddit_monitor.get_curated_showcases()
+            for showcase in reddit_showcases[:2]:  # Top 2
+                workflow = {
+                    'title': showcase['title'],
+                    'description': showcase['description'],
+                    'apps': showcase['apps'],
+                    'workflow': showcase['workflow'], 
+                    'impact': showcase['impact'],
+                    'complexity': showcase['complexity'],
+                    'source': 'Reddit Community',
+                    'showcase_score': 9
+                }
+                new_workflows.append(workflow)
+        except:
+            pass
+        
+        return new_workflows
     
     def analyze_with_gemini(self, posts: List[Dict]) -> str:
         """Send posts to Gemini for analysis"""
         if not self.gemini_api_key:
             return "Error: GEMINI_API_KEY not set"
             
-        # Prepare content for Gemini
-        prompt = "Analyze these recent AI/automation posts and extract:\n"
-        prompt += "1. Key trends and emerging tools\n"
-        prompt += "2. Best practices and workflows mentioned\n"
-        prompt += "3. Notable new releases or breakthroughs\n"
-        prompt += "4. Practical tips and use cases\n\n"
-        prompt += "Format as a clear, actionable summary with bullet points.\n\n"
+        # Discover new workflows from all sources
+        new_workflows = self.discover_new_workflows()
         
-        for post in posts[:40]:  # Gemini has higher token limits
+        # Get best workflows from database
+        db_workflows = self.workflow_db.get_best_workflows(5)
+        
+        # Create deep dive report
+        prompt = "Create a 'Weekly Workflow Deep Dive' report focused on AMAZING automation workflows.\n\n"
+        
+        prompt += "Format EXACTLY like this:\n\n"
+        
+        prompt += "# 🏆 WORKFLOW OF THE WEEK\n\n"
+        prompt += "**[Pick most impressive workflow]** - [One sentence impact]\n\n"
+        prompt += "**The Problem:** [Specific problem this solves]\n\n"
+        prompt += "**The Solution:**\n"
+        prompt += "[Step 1] → [Step 2] → [Step 3] → [Result]\n\n"
+        prompt += "**Tools Needed:** [Tool 1] + [Tool 2] + [Tool 3]\n"
+        prompt += "**Time to Build:** [X minutes]\n"
+        prompt += "**Impact:** [Specific results]\n"
+        prompt += "**Why It's Cool:** [What makes it clever]\n\n"
+        
+        prompt += "# 🚀 THIS WEEK'S COOLEST BUILDS\n\n"
+        prompt += "## [Workflow Name 1]\n"
+        prompt += "- **Problem:** [What it solves]\n"
+        prompt += "- **Flow:** [Simple workflow]\n"
+        prompt += "- **Tools:** [List of tools]\n"
+        prompt += "- **Result:** [Impact with numbers]\n\n"
+        
+        prompt += "## [Workflow Name 2]\n"
+        prompt += "- **Problem:** [What it solves]\n"
+        prompt += "- **Flow:** [Simple workflow]\n"
+        prompt += "- **Tools:** [List of tools]\n"
+        prompt += "- **Result:** [Impact with numbers]\n\n"
+        
+        prompt += "# 💰 MONEY MAKERS\n\n"
+        prompt += "Workflows that directly generate or save money:\n"
+        prompt += "- **[Name 1]**: [How it makes/saves money]\n"
+        prompt += "- **[Name 2]**: [How it makes/saves money]\n\n"
+        
+        prompt += "# ⚡ 15-MINUTE QUICK WINS\n\n"
+        prompt += "Simple automations anyone can build today:\n"
+        prompt += "- **[Name 1]**: [What it does] - [Tools needed]\n"
+        prompt += "- **[Name 2]**: [What it does] - [Tools needed]\n\n"
+        
+        prompt += "# 🔥 TRENDING TOOLS\n\n"
+        prompt += "- **[Tool 1]**: [Why it's popular]\n"
+        prompt += "- **[Tool 2]**: [Why it's popular]\n\n"
+        
+        prompt += "Here are amazing workflows to choose from:\n\n"
+        
+        # Add database workflows
+        prompt += "**FROM DATABASE:**\n"
+        for workflow in db_workflows:
+            prompt += f"- **{workflow['title']}**: {workflow.get('description', '')} | "
+            prompt += f"Tools: {' + '.join(workflow.get('apps', []))} | "
+            prompt += f"Impact: {workflow.get('impact', 'High value')} | "
+            prompt += f"Time: {workflow.get('time_to_build', 'Unknown')}\n"
+        
+        # Add discovered workflows
+        if new_workflows:
+            prompt += "\n**NEWLY DISCOVERED:**\n"
+            for workflow in new_workflows:
+                prompt += f"- **{workflow['title']}**: {workflow.get('description', '')} | "
+                prompt += f"Tools: {' + '.join(workflow.get('apps', []))} | "
+                prompt += f"Source: {workflow.get('source', '')}\n"
+        
+        prompt += "\nPick the BEST workflows and create an amazing deep dive report!\n\n"
+        
+        # Prioritize showcase posts
+        showcase_posts = [p for p in posts if p.get('is_showcase', False)]
+        other_posts = [p for p in posts if not p.get('is_showcase', False)]
+        
+        # Analyze showcase posts first, then others
+        all_sorted = showcase_posts[:20] + other_posts[:20]
+        
+        # Fetch full content for top 10 most promising posts
+        print("Fetching full content for top posts...")
+        for i, post in enumerate(all_sorted[:10]):
+            print(f"  Fetching {i+1}/10: {post['title'][:50]}...")
+            full_content = self.fetch_full_content(post['link'])
+            post['full_content'] = full_content
+            time.sleep(1)  # Be nice to servers
+        
+        for post in all_sorted[:40]:  # Gemini has higher token limits
             prompt += f"Title: {post['title']}\n"
             prompt += f"Source: {post['source']}\n"
-            prompt += f"Summary: {post['summary'][:300]}...\n"
-            prompt += f"Link: {post['link']}\n\n"
+            prompt += f"Link: {post['link']}\n"
+            
+            # Include full content if available
+            if post.get('full_content') and post['full_content']['full_text']:
+                prompt += f"FULL ARTICLE CONTENT:\n{post['full_content']['full_text'][:2000]}\n"
+                
+                if post['full_content']['code_blocks']:
+                    prompt += f"CODE EXAMPLES:\n"
+                    for code in post['full_content']['code_blocks'][:2]:
+                        prompt += f"```\n{code}\n```\n"
+                
+                if post['full_content']['metrics']:
+                    prompt += f"METRICS FOUND: {', '.join(post['full_content']['metrics'])}\n"
+                
+                if post['full_content']['workflow_steps']:
+                    prompt += f"WORKFLOW STEPS FOUND:\n"
+                    for step in post['full_content']['workflow_steps'][:5]:
+                        prompt += f"  - {step}\n"
+            else:
+                prompt += f"Summary: {post['summary'][:300]}...\n"
+                if post.get('metrics', {}).get('time_saved'):
+                    prompt += f"Time Saved: {', '.join(post['metrics']['time_saved'])}\n"
+                if post.get('metrics', {}).get('percentage'):
+                    prompt += f"Improvement: {', '.join(post['metrics']['percentage'])}%\n"
+            
+            prompt += "\n"
         
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={self.gemini_api_key}"
@@ -139,11 +462,38 @@ class AIFeedAnalyzer:
             msg['To'] = self.recipient_email
             msg['Subject'] = f"🤖 AI Trends Daily Report - {datetime.now().strftime('%B %d, %Y')}"
             
-            # Convert markdown-style formatting to HTML
-            html_analysis = analysis.replace('\n', '<br>')
-            html_analysis = html_analysis.replace('**', '</b>').replace('</b>', '<b>', 1)
-            html_analysis = html_analysis.replace('* ', '<li>')
-            html_analysis = html_analysis.replace('##', '</h2>').replace('</h2>', '<h2>', 1)
+            # Enhanced HTML conversion for better formatting
+            html_analysis = analysis
+            
+            # Convert headers
+            import re
+            html_analysis = re.sub(r'\*\*(\d+\..+?)\*\*', r'<h3>\1</h3>', html_analysis)
+            html_analysis = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html_analysis)
+            
+            # Convert bullet points with proper indentation
+            lines = html_analysis.split('\n')
+            formatted_lines = []
+            in_list = False
+            
+            for line in lines:
+                if line.strip().startswith('- '):
+                    if not in_list:
+                        formatted_lines.append('<ul>')
+                        in_list = True
+                    formatted_lines.append(f'<li>{line.strip()[2:]}</li>')
+                else:
+                    if in_list and not line.strip().startswith('  '):
+                        formatted_lines.append('</ul>')
+                        in_list = False
+                    if line.strip():
+                        formatted_lines.append(f'{line}<br>')
+                    else:
+                        formatted_lines.append('<br>')
+            
+            if in_list:
+                formatted_lines.append('</ul>')
+            
+            html_analysis = '\n'.join(formatted_lines)
             
             # HTML body
             html_body = f"""
@@ -212,6 +562,10 @@ class AIFeedAnalyzer:
         h3 {{
             color: #34495e;
             margin-top: 20px;
+            background-color: #f0f4f8;
+            padding: 10px 15px;
+            border-radius: 5px;
+            border-left: 4px solid #4285f4;
         }}
         ul {{
             list-style: none;
@@ -256,7 +610,7 @@ class AIFeedAnalyzer:
 <body>
     <div class="container">
         <div class="header">
-            <h1>🤖 AI Trends & Best Practices Report</h1>
+            <h1>🤖 Automation Workflows & AI Intelligence Report</h1>
             <div class="meta">
                 {datetime.now().strftime('%A, %B %d, %Y at %I:%M %p')}
             </div>
@@ -283,7 +637,8 @@ class AIFeedAnalyzer:
         
         <div class="footer">
             <p>Powered by Gemini AI Feed Analyzer</p>
-            <p>This report analyzes the latest AI and automation trends from Reddit, Hacker News, and Product Hunt</p>
+            <p>Monitoring automation platforms: n8n • Make.com • Zapier • ActivePieces • LangChain</p>
+            <p>Curating the best workflows, templates, and integration ideas from the automation community</p>
         </div>
     </div>
 </body>

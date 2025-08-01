@@ -1,0 +1,109 @@
+[
+  {
+    "title": "Competitor Price Monitor",
+    "description": "Automatically track competitor prices and alert when undercut",
+    "apps": [
+      "n8n",
+      "Web Scraper",
+      "Google Sheets",
+      "Slack"
+    ],
+    "workflow": "Scheduled trigger \u2192 Scrape competitor sites \u2192 Compare prices \u2192 Slack alert \u2192 Update sheet",
+    "impact": "Increased sales by 15%, saved 2 hours daily",
+    "complexity": "Intermediate",
+    "time_to_build": "45 minutes",
+    "category": "e-commerce",
+    "showcase_score": 9,
+    "source": "curated",
+    "id": 1,
+    "added_date": "2025-08-01T14:27:58.567165",
+    "last_featured": null,
+    "feature_count": 0
+  },
+  {
+    "title": "Smart Email-to-Task System",
+    "description": "AI analyzes emails and creates prioritized tasks automatically",
+    "apps": [
+      "Gmail",
+      "n8n",
+      "OpenAI",
+      "Notion",
+      "Slack"
+    ],
+    "workflow": "Gmail trigger \u2192 OpenAI analysis \u2192 Create Notion task \u2192 Assign team member \u2192 Slack notification",
+    "impact": "0 missed requests, 70% faster response time",
+    "complexity": "Advanced",
+    "time_to_build": "60 minutes",
+    "category": "productivity",
+    "showcase_score": 10,
+    "source": "curated",
+    "id": 2,
+    "added_date": "2025-08-01T14:27:58.567334",
+    "last_featured": null,
+    "feature_count": 0
+  },
+  {
+    "title": "Invoice Chase Bot",
+    "description": "Automatically chase overdue invoices with escalating reminders",
+    "apps": [
+      "QuickBooks",
+      "n8n",
+      "Twilio",
+      "SendGrid"
+    ],
+    "workflow": "Daily check \u2192 Day 1: email \u2192 Day 7: firm email \u2192 Day 14: SMS \u2192 Day 21: legal notice",
+    "impact": "Payment time reduced from 45 to 23 days, recovered $15K",
+    "complexity": "Intermediate",
+    "time_to_build": "50 minutes",
+    "category": "finance",
+    "showcase_score": 9,
+    "source": "curated",
+    "id": 3,
+    "added_date": "2025-08-01T14:27:58.567432",
+    "last_featured": null,
+    "feature_count": 0
+  },
+  {
+    "title": "Social Media Content Recycler",
+    "description": "Turn one post into content for all platforms automatically",
+    "apps": [
+      "n8n",
+      "Twitter API",
+      "LinkedIn API",
+      "ChatGPT",
+      "Buffer"
+    ],
+    "workflow": "Top post trigger \u2192 ChatGPT rewrite for each platform \u2192 Schedule everywhere \u2192 Track performance",
+    "impact": "10x content output, 5 hours saved weekly",
+    "complexity": "Advanced",
+    "time_to_build": "75 minutes",
+    "category": "marketing",
+    "showcase_score": 8,
+    "source": "curated",
+    "id": 4,
+    "added_date": "2025-08-01T14:27:58.567530",
+    "last_featured": null,
+    "feature_count": 0
+  },
+  {
+    "title": "Apartment Hunting Bot",
+    "description": "Scrapes listings and sends only the perfect matches instantly",
+    "apps": [
+      "Python",
+      "BeautifulSoup",
+      "Telegram",
+      "Google Sheets"
+    ],
+    "workflow": "Scrape every 15 min \u2192 Filter criteria \u2192 Check blacklist \u2192 Telegram alert \u2192 Log to sheet",
+    "impact": "Found apartment 2 weeks faster than manual search",
+    "complexity": "Advanced",
+    "time_to_build": "90 minutes",
+    "category": "personal",
+    "showcase_score": 8,
+    "source": "reddit",
+    "id": 5,
+    "added_date": "2025-08-01T14:27:58.567625",
+    "last_featured": null,
+    "feature_count": 0
+  }
+]
