@@ -2,8 +2,8 @@ name: AI Feed Analyzer
 
 on:
   schedule:
-    # Run every day at 8:00 AM UTC (adjust timezone as needed)
-    - cron: '0 8 * * *'
+    # Run every day at 10:30 AM BRT/São Paulo time (13:30 UTC)
+    - cron: '30 13 * * *'
   workflow_dispatch: # Allows manual triggering
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
         
     - name: Install dependencies
       run: |
-        pip install feedparser requests
+        pip install feedparser requests python-dotenv
         
     - name: Run AI Feed Analyzer
       env:
